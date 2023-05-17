@@ -39,7 +39,7 @@ WORKDIR $BASEDIR
 RUN sed -i 's/http:\/\/archive.ubuntu.com\/ubuntu\//mirror:\/\/mirrors.ubuntu.com\/mirrors.txt/g' /etc/apt/sources.list
 RUN apt-get update && \
     apt-get install -y software-properties-common  && \
-    apt-get install -y python3 python3-pip git curl unzip python3-gdal 
+    apt-get install -y python3 python3-pip git curl unzip python3-gdal
 
 # install pygeoapi
 RUN git clone $PYGEOAPI_GITREPO && \
@@ -63,6 +63,8 @@ COPY . $BASEDIR/msc-pygeoapi
 RUN cd msc-pygeoapi && \
     # requirements.txt includes elasticsearch<8
     pip3 install -r requirements.txt && \
+    # install dask explictly for nightly build to avoid conflicts with DEV system dependencies
+    pip3 install dask && \
     pip3 install elasticsearch_dsl && \
     pip3 install -U elasticsearch_dsl && \
     pip3 install -U elasticsearch && \

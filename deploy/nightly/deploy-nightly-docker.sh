@@ -57,11 +57,11 @@ echo "Generating nightly build for $TIMESTAMP"
 mkdir $NIGHTLYDIR && cd $NIGHTLYDIR
 
 echo "Cloning Git repository"
-git clone $MSC_PYGEOAPI_GITREPO . -b master --depth=1
+git clone $MSC_PYGEOAPI_GITREPO . -b docker-dev-21 --depth=1
 
 echo "Stopping/building/starting Docker setup"
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml down
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml build --no-cache
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml down
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml up -d
 
 cat > msc-pygeoapi-nightly.conf <<EOF
