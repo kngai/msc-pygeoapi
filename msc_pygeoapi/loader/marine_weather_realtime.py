@@ -29,20 +29,17 @@
 # =================================================================
 
 from datetime import datetime, timedelta, timezone
-import json
 import logging
 import os
 from pathlib import Path
 import re
 
 import click
-from elasticsearch import exceptions
 from lxml import etree
 from parse import parse
 
 from msc_pygeoapi import cli_options
 from msc_pygeoapi.connector.elasticsearch_ import ElasticsearchConnector
-from msc_pygeoapi.env import MSC_PYGEOAPI_BASEPATH
 from msc_pygeoapi.loader.base import BaseLoader
 from msc_pygeoapi.util import (
     configure_es_connection,
@@ -785,48 +782,63 @@ class MarineWeatherRealtimeLoader(BaseLoader):
 
     def _set_area_info(self):
         """
-        Gets the area name from the marine weather XML document and
-        looks up the equivalent meteocode forecast polygon feature ID to
-        query the forecast_polygons_water ES index for the corresponding
-        document. If document is found, assigns the self.area class attribute
-        that contains region name, subregion name, area name and the
-        associated geometry.
+        Gets the area name from the English marine weather XML document and
+        queries the forecast_polygons_water ES index for the document whose
+        NAME field matches the area name, case-insensitively. The resulting
+        document's geometry is associated with the marine weather feature,
+        and area info (region name, subregion name, area name) is set for
+        both languages from their respective XML area elements.
         :return: `bool` representing successful setting of self.area attribute
         """
+        area_elem_en = self.xml_roots['en'].find('area')
+        area_name_en = (
+            area_elem_en.text.strip()
+            if area_elem_en is not None and area_elem_en.text
+            else None
+        )
+
+        if not area_name_en:
+            LOGGER.warning('No area name found in en XML.')
+            return False
+
+        query = {
+            'query': {
+                'term': {
+                    'properties.NAME.normalize': area_name_en
+                }
+            }
+        }
+
+        result = self.conn.Elasticsearch.search(
+            index=FORECAST_POLYGONS_WATER_ES_INDEX,
+            body=query,
+            _source=['geometry'],
+            size=1
+        )
+
+        hits = result['hits']['hits']
+        if not hits:
+            LOGGER.warning(
+                f'Could not find forecast polygon document matching '
+                f'NAME: {area_name_en}'
+            )
+            return False
+
+        self.marine_weather_feature['geometry'] = hits[0]['_source'].get(
+            'geometry'
+        )
+
         for lang in self.xml_roots:
-            with open(
-                os.path.join(
-                    MSC_PYGEOAPI_BASEPATH,
-                    'resources/meteocode_lookup.json',
-                )
-            ) as json_file:
-                meteocode_lookup = json.load(json_file)
-                forecast_id = meteocode_lookup[self.region_name_code]
+            area = self._node_to_dict(
+                self.xml_roots[lang].find('area'), lang=lang
+            )
 
-            try:
-                result = self.conn.Elasticsearch.get(
-                    index=FORECAST_POLYGONS_WATER_ES_INDEX,
-                    id=forecast_id,
-                    _source=['geometry']
-                )
+            self._set_nested_value(
+                self.marine_weather_feature['properties'],
+                ['area'],
+                area
+            )
 
-                geometry = result['_source'].get('geometry')
-
-                area = self._node_to_dict(
-                    self.xml_roots[lang].find('area'), lang=lang
-                )
-
-                self._set_nested_value(
-                    self.marine_weather_feature['properties'],
-                    ['area'],
-                    area
-                )
-
-                self.marine_weather_feature['geometry'] = geometry
-
-            except exceptions.NotFoundError:
-                LOGGER.warning(f'Could not get forecast polygon document with id: {forecast_id}')  # noqa
-                return False
         return True
 
     def _set_warning(self):
